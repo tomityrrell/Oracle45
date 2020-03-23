@@ -2,6 +2,8 @@ from collections import defaultdict
 import random
 
 import pandas as pd
+from sklearn.feature_extraction.text import TfidfVectorizer
+
 
 ## INSPIRATION ##
 
@@ -10,9 +12,9 @@ import pandas as pd
 
 def generate_trigrams(words):
     if len(words) < 3:
-        return
-    for i in range(len(words) - 2):
-        yield words[i], words[i + 1], words[i + 2]
+        return []
+    else:
+        return list(zip(words[:-2], words[1:-1], words[2:]))
 
 
 class MarkovTweetGenerator:
@@ -21,18 +23,22 @@ class MarkovTweetGenerator:
 
         self.tweets = pd.read_csv("tweets.csv", parse_dates=['created_at'])
 
-        self.tweets["filtered_text"] = self.tweets.text.apply(self.filter_tweet)
-
         self.default_trigram = ("BEGIN", "NOW", "END")
-        self.tweets["trigrams"] = self.tweets.filtered_text.apply(generate_trigrams)
+        self.tweets["filtered_text"] = self.tweets.text.apply(self.filter_tweet)
+        self.tweets["trigrams"] = self.tweets["filtered_text"].apply(generate_trigrams)
 
         # keys are bigrams
-        self.chain = defaultdict(list)
-        self.generate_markov_chain()
+        self.chain = self.generate_markov_chain()
+
+        self.vectorizer = TfidfVectorizer()
+        self.tdMatrix = self.vectorizer.fit_transform(self.tweets.filtered_text.apply(lambda l: ' '.join(l)))
+        self.tdDataFrame = pd.SparseDataFrame(self.tdMatrix)
 
     def filter_tweet(self, tweet):
         # initial text processing
         flat_tweet = tweet
+        if flat_tweet.startswith("RT"):
+            flat_tweet = flat_tweet[flat_tweet.index(":")+1:]
 
         # filtering
         words = ["BEGIN", "NOW"]
@@ -41,8 +47,6 @@ class MarkovTweetGenerator:
                 continue
             elif "http" in w:
                 words.append(w[:w.index("http")])
-            elif w in ["RT"]:
-                continue
             else:
                 words.append(w)
         words.append("END")
@@ -54,7 +58,7 @@ class MarkovTweetGenerator:
 
     def generate_markov_chain(self):
         # reset chain on each call
-        self.chain = defaultdict(list)
+        chain = defaultdict(list)
 
         # Loop through text in sources and generate trigrams
         for gen in self.tweets.trigrams:
@@ -63,9 +67,11 @@ class MarkovTweetGenerator:
                 if trigram == self.default_trigram:
                     continue
                 else:
-                    self.chain[trigram[:2]].append(trigram[2])
+                    chain[trigram[:2]].append(trigram[2])
 
-    def generate_prediction(self):
+        return chain
+
+    def generate_tweet(self):
         prediction = []
 
         # Random/Generic start point
